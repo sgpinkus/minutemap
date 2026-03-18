@@ -1,7 +1,7 @@
 # (YEARLY) MINUTE MAP
 The idea is you can specify a value (`int` by default) for any and every minute of an entire year. Which particular year isn't representable. Hierarchical specifiiers and priority matching rules are employed to determine the value for any given minute of the year. A specification takes the form of a set of `<expression, value>` pairs in JSON or as a dictionary.
 
-An `expression` is a dot-separated sequence of time tokens (coarse -> fine). The wildcard "\*" may appear as a standalone spec or as a leaf segment, and is equivalent to truncating the path there (i.e. "h19.*" == "h19").
+An `expression` is a dot-separated sequence of time tokens. The wildcard "\*" may appear as a standalone spec or as a leaf segment, and means "everything else" not matched my siblings at this level.
 
 The method `YearMinuteMap.get_value()` takes a `datetime`, and returns a value by selecting the most specific matching spec's value . Example:
 
@@ -48,7 +48,7 @@ Input may be a flat or arbitrarily nested dict; nested dicts are flattened by jo
   }
 ```
 
-**EBNF for expressions:**
+**EBNF for expression:**
 
 ```
 SPEC      ::= "*" | PATH
@@ -75,7 +75,7 @@ MM        ::= "m" RANGE        // 0–59
 RANGE     ::= DIGITS | DIGITS "-" DIGITS
 ```
 
-The grammar does not allow use of the same type of token twice (ex "dom12.dom13", "q1.apr") and enforces a hierarchy.
+The grammar does not allow use of the same type of token twice (ex "dom12.dom13") or certain chaining (ex "q1.apr").
 
 MOY and DOW have aliases MONTH and WEEKDAY not shown in EBNF:
 
@@ -98,6 +98,8 @@ WEEKDAY   ::= "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
         *               Wildcard leaf — "match everything from here"
         RANGE ::= DIGITS | DIGITS "-" DIGITS
 
-Longer paths beat shorter ones and this order is used for tie breaks (TODO: allow user to specify ordering):
+**Tie breaking:**
+
+Longer (more dots) paths beat shorter ones. The following order is used for tie breaks (TODO: allow user to specify ordering):
 
         QTR < MOY < DOW < DOM < WOY < DOY < HH < MM
