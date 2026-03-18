@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "minutemap"
+version = "0.1.0"
+description = "Provides a data type for mapping a value to every minute of a year and then resolve a value given a date"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+keywords = ["schedule", "time", "calendar", "home-assistant"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Home Automation",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/sgpinkue/minutemap"
+Repository = "https://github.com/sgpinkus/minutemap"
+Issues = "https://github.com/sgpinkus/minutemap/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["minutemap"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
