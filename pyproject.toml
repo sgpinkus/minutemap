@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "minutemap"
-version = "0.1.0"
+version = "0.1.1"
 description = "Provides a data type for mapping a value to every minute of a year and then resolve a value given a date"
 readme = "README.md"
 license = { text = "MIT" }
