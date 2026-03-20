@@ -1,7 +1,11 @@
 # (YEARLY) MINUTE MAP
-The idea is you can specify a value (`int` by default) for any and every minute of an entire year. Which particular year isn't representable. Hierarchical specifiiers and priority matching rules are employed to determine the value for any given minute of the year. A specification takes the form of a set of `<expression, value>` pairs in JSON or as a dictionary.
+The idea is you can specify a value (`int` by default) for any and every minute of an entire year. Which particular year isn't representable.
+
+Time specifiers are like cron but hierarchical. Hierarchy and priority matching rules are used to determine the value for any given minute of the year. A specification takes the form of a set of `<expression, value>` pairs in JSON or as a dictionary.
 
 An `expression` is a dot-separated sequence of time tokens. The wildcard "\*" may appear as a standalone spec or as a leaf segment, and means "everything else" not matched my siblings at this level.
+
+Input may be a flat nested form; nested dicts are flattened by joining their key paths with ".".  Both dict and JSON string are accepted.
 
 The method `YearMinuteMap.get_value()` takes a `datetime`, and returns a value by selecting the most specific matching spec's value . Example:
 
@@ -36,8 +40,7 @@ spec = YearMinuteMap(my_minute_map)
 spec.get_value(my_date) # -> value
 ```
 
-Input may be a flat or arbitrarily nested dict; nested dicts are flattened by joining their key paths with ".".  Both dict and JSON string are accepted. Flat Example:
-
+Flat Example:
 
 ```
   {
@@ -46,6 +49,15 @@ Input may be a flat or arbitrarily nested dict; nested dicts are flattened by jo
     "q1.sun.h1-10.m1": 3
     "q1.sun.h1-10.m2": 4
   }
+```
+
+Crontab like steps and lists are also supported:
+
+```
+{
+    "h0-11.m*/2": 1,
+    "h12-23.m*/3": 2
+}
 ```
 
 **EBNF for expression:**
