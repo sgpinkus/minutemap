@@ -3,120 +3,197 @@ YearMinuteMap — hierarchical minute-resolution value scheduling.
 """
 
 from __future__ import annotations
+from abc import ABC, abstractmethod
+from typing import Literal, Any
 import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+
+
+NormalTokenKey = Literal["moy", "dow", "dom", "woy", "doy", "h", "m"]
+TokenKey = Literal["q"] | NormalTokenKey
 
 TOKEN_SPECIFICITY: dict[str, int] = {
-    "QTR": 10,
-    "MOY": 20,
-    "DOW": 30,
-    "DOM": 40,
-    "WOY": 50,
-    "DOY": 60,
-    "HH":  70,
-    "MM":  80,
+    "q": 10,
+    "moy": 20,
+    "dow": 30,
+    "dom": 40,
+    "woy": 50,
+    "doy": 60,
+    "h": 70,
+    "m": 80,
 }
 TOKEN_ALLOWED_CHILDREN: dict[str, set[str]] = {
-    "QTR": {"DOM", "DOW", "HH", "MM"},
-    "MOY": {"DOM", "DOW", "HH", "MM"},
-    "WOY": {"DOW", "HH", "MM"},
-    "DOY": {"HH", "MM"},
-    "DOM": {"HH", "MM"},
-    "DOW": {"HH", "MM"},
-    "HH":  {"MM"},
-    "MM":  set(),
+    "q": {"dom", "dow", "h", "m"},
+    "moy": {"dom", "dow", "h", "m"},
+    "woy": {"dow", "h", "m"},
+    "doy": {"h", "m"},
+    "dom": {"h", "m"},
+    "dow": {"h", "m"},
+    "h": {"m"},
+    "m": set(),
 }
-TOKEN_VALID_ROOTS = {"QTR", "MOY", "WOY", "DOY", "DOM", "DOW", "HH", "MM"}
 MONTH_ALIASES: dict[str, int] = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4,
-    "may": 5, "jun": 6, "jul": 7, "aug": 8,
-    "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
 }
 DOW_ALIASES: dict[str, int] = {
-    "mon": 1, "tue": 2, "wed": 3, "thu": 4,
-    "fri": 5, "sat": 6, "sun": 7,
+    "mon": 1,
+    "tue": 2,
+    "wed": 3,
+    "thu": 4,
+    "fri": 5,
+    "sat": 6,
+    "sun": 7,
 }
-QTR_MONTHS: dict[str, tuple[int, int]] = {
-    "q1": (1, 3), "q2": (4, 6), "q3": (7, 9), "q4": (10, 12),
+Q_MONTHS: dict[str, tuple[int, int]] = {
+    "q1": (1, 3),
+    "q2": (4, 6),
+    "q3": (7, 9),
+    "q4": (10, 12),
 }
-# Tried in order after aliases; first prefix match wins.
-_TOKEN_PATTERNS: list[tuple[str, str, int, int]] = [
-    ("moy", "MOY", 1,  12),
-    ("woy", "WOY", 1,  53),
-    ("doy", "DOY", 1, 366),
-    ("dom", "DOM", 1,  31),
-    ("dow", "DOW", 1,   7),
-    ("h",   "HH",  0,  23),
-    ("m",   "MM",  0,  59),
-]
+TOKEN_RANGES: dict[NormalTokenKey, tuple[int, int]] = {
+    "moy": (1, 12),
+    "woy": (1, 53),
+    "doy": (1, 366),
+    "dom": (1, 31),
+    "dow": (1, 7),
+    "h": (0, 23),
+    "m": (0, 59),
+}
+
+
+class Token(ABC):
+    kind: str
+
+    @abstractmethod
+    def matches(self, v: int) -> bool:
+        pass
+
 
 @dataclass(frozen=True)
-class Token:
-    """ Token dataclass """
+class RangeToken(Token):
+    """Token dataclass"""
+
     kind: str
     lo: int
     hi: int
+    step: int | None = None
 
-    def matches(self, value: int) -> bool:
-        return self.lo <= value <= self.hi
+    def matches(self, v: int) -> bool:
+        if not self.step:
+            return self.lo <= v <= self.hi
+        else:
+            return self.lo <= v and ((v - self.lo) % self.step) == 0 and v <= self.hi
+
+    def __str__(self):
+        return f"{self.kind}{self.lo}-{self.hi}" + (
+            f"/{self.step}" if self.step else ""
+        )
+
+
+@dataclass(frozen=True)
+class LstToken(Token):
+    """Token dataclass"""
+
+    kind: str
+    lst: list[int]
+
+    def matches(self, v: int) -> bool:
+        return v in self.lst
+
+    def __str__(self):
+        return f"{self.kind}{','.join([str(v) for v in self.lst])}"
 
 
 # Empty tuple == wildcard (matches everything).
 ParsedPath = tuple[Token, ...]
 
+
 class ParseError(ValueError):
     pass
 
 
-def _parse_range(text: str, lo_bound: int, hi_bound: int, kind: str) -> tuple[int, int]:
-    m = re.fullmatch(r'(\d+)(?:-(\d+))?', text)
-    if not m:
+def parse_range(kind: NormalTokenKey, text: str) -> Token:
+    lo_bound, hi_bound = TOKEN_RANGES[kind]
+    if m := re.fullmatch(r"(\d+)(?:-(\d+))?(\/(\d+))?", text):
+        lo = int(m.group(1))
+        hi = int(m.group(2)) if m.group(2) else lo
+        step = int(m.group(4)) if m.group(4) else None
+        if lo > hi:
+            raise ParseError(f"Range lo > hi in '{text}' for {kind}")
+        if lo < lo_bound or hi > hi_bound:
+            raise ParseError(
+                f"Range {lo}-{hi} out of bounds [{lo_bound},{hi_bound}] for {kind}"
+            )
+        if (step is not None) and step <= 0:
+            raise ParseError(f"Range step {step} must be gte to 0")
+        return RangeToken(kind, lo=lo, hi=hi, step=step)
+    elif m := re.fullmatch(
+        r"\*\/(\d+)", text
+    ):  # The "*" case not handled here - handled by removing the range.
+        lo = lo_bound
+        hi = hi_bound
+        step = int(m.group(1))
+        if step <= 0:
+            raise ParseError(f"Range step {step} must be gte to 0")
+        return RangeToken(kind, lo=lo, hi=hi, step=step)
+    elif re.fullmatch(r"(\d+)(,(\d+))+", text):
+        lst = [int(i) for i in text.split(",")]
+        lo = min(lst)
+        hi = max(lst)
+        if lo > hi:
+            raise ParseError(f"Range lo > hi in '{text}' for {kind}")
+        if lo < lo_bound or hi > hi_bound:
+            raise ParseError(
+                f"Range {lo}-{hi} out of bounds [{lo_bound},{hi_bound}] for {kind}"
+            )
+        return LstToken(kind, lst)
+    else:
         raise ParseError(f"Invalid range '{text}' for {kind}")
-    lo = int(m.group(1))
-    hi = int(m.group(2)) if m.group(2) else lo
-    if lo > hi:
-        raise ParseError(f"Range lo > hi in '{text}' for {kind}")
-    if lo < lo_bound or hi > hi_bound:
-        raise ParseError(
-            f"Range {lo}-{hi} out of bounds [{lo_bound},{hi_bound}] for {kind}"
-        )
-    return lo, hi
 
 
 def _parse_part(part: str) -> Token:
-    """ Parse one dot-separated segment into a Token. """
+    """Parse one dot-separated segment into a Token."""
     low = part.lower()
 
-    if low in QTR_MONTHS:
-        lo, hi = QTR_MONTHS[low]
-        return Token("QTR", lo, hi)
+    if low in Q_MONTHS:
+        lo, hi = Q_MONTHS[low]
+        return RangeToken("q", lo, hi)
 
     if low in MONTH_ALIASES:
         v = MONTH_ALIASES[low]
-        return Token("MOY", v, v)
+        return RangeToken("moy", v, v)
 
     if low in DOW_ALIASES:
         v = DOW_ALIASES[low]
-        return Token("DOW", v, v)
+        return RangeToken("dow", v, v)
 
-    for prefix, kind, lb, ub in _TOKEN_PATTERNS:
+    for prefix in TOKEN_RANGES.keys():
         if low.startswith(prefix):
-            range_text = low[len(prefix):]
+            range_text = low[len(prefix) :]
             if not range_text:
                 raise ParseError(f"Missing range after '{prefix}' in '{part}'")
-            lo, hi = _parse_range(range_text, lb, ub, kind)
-            return Token(kind, lo, hi)
+            return parse_range(prefix, range_text)
 
     raise ParseError(f"Unrecognised token '{part}'")
 
 
 def parse_spec(spec: str) -> ParsedPath:
-    """ Parse a spec string into an ordered tuple of Tokens (coarse → fine).
+    """Parse a spec string into an ordered tuple of Tokens (coarse → fine).
     Returns an empty tuple for a bare wildcard ("*"). A trailing ".*" leaf is
-    stripped before parsing ("h19.*" == "h19"). """
+    stripped before parsing ("h19.*" == "h19")."""
     s = spec.strip()
 
     if s == "*":
@@ -148,16 +225,18 @@ def parse_spec(spec: str) -> ParsedPath:
     return tuple(tokens)
 
 
-def _flatten(node: Any, prefix: list[str], out: list[tuple[str, int]], value_cls: object) -> None:
-    """ Recursively walk a nested dict, collecting (spec_string, int_value) pairs.
-    A "*" key at any level does not contribute a path segment (leaf wildcard). """
+def _flatten(
+    node: Any, prefix: list[str], out: list[tuple[str, int]], value_cls: type
+) -> None:
+    """Recursively walk a nested dict, collecting (spec_string, int_value) pairs.
+    A "*" key at any level does not contribute a path segment (leaf wildcard)."""
     if isinstance(node, value_cls):
         spec = ".".join(prefix) if prefix else "*"
         out.append((spec, node))
     elif isinstance(node, dict):
-        for key, child in node.items():
+        for key, child in node.items():  # pyright: ignore[reportUnknownVariableType]
             if key == "*":
-                _flatten(child, prefix, out, value_cls)       # "*" adds nothing to path
+                _flatten(child, prefix, out, value_cls)  # "*" adds nothing to path
             else:
                 _flatten(child, prefix + [key], out, value_cls)
     else:
@@ -168,41 +247,41 @@ def _flatten(node: Any, prefix: list[str], out: list[tuple[str, int]], value_cls
 
 
 def _specificity(path: ParsedPath) -> tuple[int, int]:
-    """ (depth, max_rank) - longer paths win; ties broken by finest token rank.
-    Empty path (wildcard) scores (0, 0). """
+    """(depth, max_rank) - longer paths win; ties broken by finest token rank.
+    Empty path (wildcard) scores (0, 0)."""
     if not path:
         return (0, 0)
     return (len(path), max(TOKEN_SPECIFICITY[t.kind] for t in path))
 
 
 def _matches_path(path: ParsedPath, dt: datetime) -> bool:
-    """ Return True if every token in the path matches the datetime. """
+    """Return True if every token in the path matches the datetime."""
     if not path:
-        return True   # wildcard
+        return True  # wildcard
 
-    iso_year, iso_week, iso_dow = dt.isocalendar()
+    _iso_year, iso_week, iso_dow = dt.isocalendar()
     doy = dt.timetuple().tm_yday
 
     for tok in path:
-        if tok.kind in ("QTR", "MOY"):
+        if tok.kind in ("q", "moy"):
             if not tok.matches(dt.month):
                 return False
-        elif tok.kind == "WOY":
+        elif tok.kind == "woy":
             if not tok.matches(iso_week):
                 return False
-        elif tok.kind == "DOY":
+        elif tok.kind == "doy":
             if not tok.matches(doy):
                 return False
-        elif tok.kind == "DOM":
+        elif tok.kind == "dom":
             if not tok.matches(dt.day):
                 return False
-        elif tok.kind == "DOW":
+        elif tok.kind == "dow":
             if not tok.matches(iso_dow):
                 return False
-        elif tok.kind == "HH":
+        elif tok.kind == "h":
             if not tok.matches(dt.hour):
                 return False
-        elif tok.kind == "MM":
+        elif tok.kind == "m":
             if not tok.matches(dt.minute):
                 return False
     return True
@@ -211,6 +290,7 @@ def _matches_path(path: ParsedPath, dt: datetime) -> bool:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 class YearMinuteMap:
     """
@@ -241,7 +321,7 @@ class YearMinuteMap:
 
     """
 
-    def __init__(self, spec: str | dict, value_cls: object = int) -> None:
+    def __init__(self, spec: str | dict[str, Any], value_cls: type = int) -> None:
         if isinstance(value_cls, dict):
             raise ValueError("value_cls must not be dict")
         self.value_cls = value_cls
@@ -270,15 +350,15 @@ class YearMinuteMap:
         self._entries.sort(key=lambda e: _specificity(e[0]), reverse=True)
 
     def get_value(self, dt: datetime) -> int | None:
-        """ Return the value of the most specific matching spec, or None. """
+        """Return the value of the most specific matching spec, or None."""
         for path, value in self._entries:
             if _matches_path(path, dt):
                 return value
         return None
 
     def get_matching_spec(self, dt: datetime) -> str | None:
-        """ Return the canonical spec string that matched, or None. """
-        for path, value in self._entries:
+        """Return the canonical spec string that matched, or None."""
+        for path, _value in self._entries:
             if _matches_path(path, dt):
                 return _path_to_str(path)
         return None
@@ -289,39 +369,15 @@ class YearMinuteMap:
 
 
 def _path_to_str(path: ParsedPath) -> str:
-    """ Canonical string reconstruction. """
+    """Canonical string reconstruction."""
     if not path:
         return "*"
-    parts = []
-    for tok in path:
-        lo, hi = tok.lo, tok.hi
-        rng = str(lo) if lo == hi else f"{lo}-{hi}"
-        if tok.kind == "QTR":
-            label = next(
-                (q for q, (ql, qh) in QTR_MONTHS.items() if (lo, hi) == (ql, qh)),
-                f"moy{rng}",
-            )
-            parts.append(label)
-        elif tok.kind == "MOY":
-            parts.append(f"moy{rng}")
-        elif tok.kind == "WOY":
-            parts.append(f"woy{rng}")
-        elif tok.kind == "DOY":
-            parts.append(f"doy{rng}")
-        elif tok.kind == "DOM":
-            parts.append(f"dom{rng}")
-        elif tok.kind == "DOW":
-            parts.append(f"dow{rng}")
-        elif tok.kind == "HH":
-            parts.append(f"h{rng}")
-        elif tok.kind == "MM":
-            parts.append(f"m{rng}")
-    return ".".join(parts)
+    return ".".join([str(tok) for tok in path])
 
 
 if __name__ == "__main__":
     """ Demo."""
-    my_minute_map = {
+    my_minute_map: dict[str, Any] = {
         "*": 8,
         "h5-10": 28,
         "h19": {
@@ -351,18 +407,20 @@ if __name__ == "__main__":
     print(ymm)
     print()
     tests = [
-        (datetime(2024, 1, 15,  3,  0),  8, "winter night → *"),
-        (datetime(2024, 1, 15,  7,  0), 28, "winter morning h5-10"),
-        (datetime(2024, 1, 15, 19,  0), 18, "h19.*"),
+        (datetime(2024, 1, 15, 3, 0), 8, "winter night → *"),
+        (datetime(2024, 1, 15, 7, 0), 28, "winter morning h5-10"),
+        (datetime(2024, 1, 15, 19, 0), 18, "h19.*"),
         (datetime(2024, 1, 15, 19, 45), 22, "h19.m30-59"),
-        (datetime(2024, 5,  1,  2,  0), 10, "q2.h0-4"),
-        (datetime(2024, 5,  1,  7,  0), 30, "q2.h5-10"),
-        (datetime(2024, 8,  4,  7,  0), 34, "q3.sun.h5-10"),
-        (datetime(2024, 8,  5,  7,  0), 32, "q3.mon.h5-10 (no sun override)"),
-        (datetime(2024, 8,  4, 20,  0), 23, "q3.sun.h19-23"),
+        (datetime(2024, 5, 1, 2, 0), 10, "q2.h0-4"),
+        (datetime(2024, 5, 1, 7, 0), 30, "q2.h5-10"),
+        (datetime(2024, 8, 4, 7, 0), 34, "q3.sun.h5-10"),
+        (datetime(2024, 8, 5, 7, 0), 32, "q3.mon.h5-10 (no sun override)"),
+        (datetime(2024, 8, 4, 20, 0), 23, "q3.sun.h19-23"),
     ]
     for dt, expected, label in tests:
         got = ymm.get_value(dt)
         matched = ymm.get_matching_spec(dt)
         status = "✓" if got == expected else f"✗ (expected {expected})"
-        print(f"  {status}  {dt.strftime('%Y-%m-%d %H:%M')}  → {got!s:3}  ({matched})  # {label}")
+        print(
+            f"  {status}  {dt.strftime('%Y-%m-%d %H:%M')}  → {got!s:3}  ({matched})  # {label}"
+        )
