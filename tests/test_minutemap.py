@@ -112,6 +112,73 @@ class TestYearMinuteMap(unittest.TestCase):
                 1,
                 "specificity: h9.* loses to h9.m0 for non-matching minute",
             ),
+            # Step range — h
+            ({"h0-23/6": 5}, datetime(2024, 3, 1, 0, 0), 5, "h/6 matches hour 0"),
+            ({"h0-23/6": 5}, datetime(2024, 3, 1, 6, 0), 5, "h/6 matches hour 6"),
+            ({"h0-23/6": 5}, datetime(2024, 3, 1, 12, 0), 5, "h/6 matches hour 12"),
+            (
+                {"h0-23/6": 5},
+                datetime(2024, 3, 1, 7, 0),
+                None,
+                "h/6 does not match hour 7",
+            ),
+            # Step range — m
+            ({"m0-59/15": 3}, datetime(2024, 3, 1, 9, 0), 3, "m/15 matches minute 0"),
+            ({"m0-59/15": 3}, datetime(2024, 3, 1, 9, 30), 3, "m/15 matches minute 30"),
+            (
+                {"m0-59/15": 3},
+                datetime(2024, 3, 1, 9, 7),
+                None,
+                "m/15 does not match minute 7",
+            ),
+            # List range
+            (
+                {"m0,15,30,45": 9},
+                datetime(2024, 3, 1, 9, 15),
+                9,
+                "minute list matches 15",
+            ),
+            (
+                {"m0,15,30,45": 9},
+                datetime(2024, 3, 1, 9, 45),
+                9,
+                "minute list matches 45",
+            ),
+            (
+                {"m0,15,30,45": 9},
+                datetime(2024, 3, 1, 9, 10),
+                None,
+                "minute list does not match 10",
+            ),
+            # Step + specificity: exact minute beats step
+            (
+                {"m5-45/15": 1, "m30": 2, "m*/15": 3},
+                datetime(2024, 3, 1, 9, 30),
+                2,
+                "exact minute beats step at m30",
+            ),
+            # */step wildcard range
+            ({"m*/5": 3}, datetime(2024, 3, 1, 9, 0), 3, "m*/5 matches minute 0"),
+            ({"m*/5": 3}, datetime(2024, 3, 1, 9, 15), 3, "m*/5 matches minute 15"),
+            (
+                {"m*/5": 3},
+                datetime(2024, 3, 1, 9, 7),
+                None,
+                "m*/5 does not match minute 7",
+            ),
+            ({"h*/4": 5}, datetime(2024, 3, 1, 8, 0), 5, "h*/4 matches hour 8"),
+            (
+                {"h*/4": 5},
+                datetime(2024, 3, 1, 9, 0),
+                None,
+                "h*/4 does not match hour 9",
+            ),
+            (
+                {"m*/5": 1, "m0-59/5": 1},
+                datetime(2024, 3, 1, 9, 10),
+                1,
+                "m*/5 and m0-59/5 are equivalent",
+            ),
         ]
         for spec, dt, expected, description in cases:
             with self.subTest(description):

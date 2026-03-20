@@ -75,10 +75,14 @@ TOKEN_RANGES: dict[NormalTokenKey, tuple[int, int]] = {
 
 
 class Token(ABC):
-    kind: str
+    kind: NormalTokenKey
 
     @abstractmethod
     def matches(self, v: int) -> bool:
+        pass
+
+    @abstractmethod
+    def rank(self) -> int:
         pass
 
 
@@ -86,10 +90,11 @@ class Token(ABC):
 class RangeToken(Token):
     """Token dataclass"""
 
-    kind: str
+    kind: NormalTokenKey
     lo: int
     hi: int
     step: int | None = None
+    alias: str | None = None
 
     def matches(self, v: int) -> bool:
         if not self.step:
@@ -97,9 +102,15 @@ class RangeToken(Token):
         else:
             return self.lo <= v and ((v - self.lo) % self.step) == 0 and v <= self.hi
 
+    def rank(self) -> int:
+        return 1000 - round((self.hi - self.lo) / (self.step if self.step else 1))
+
     def __str__(self):
-        return f"{self.kind}{self.lo}-{self.hi}" + (
-            f"/{self.step}" if self.step else ""
+        return (
+            self.alias
+            if self.alias
+            else f"{self.kind}{self.lo}-{self.hi}"
+            + (f"/{self.step}" if self.step else "")
         )
 
 
@@ -107,14 +118,22 @@ class RangeToken(Token):
 class LstToken(Token):
     """Token dataclass"""
 
-    kind: str
+    kind: NormalTokenKey
     lst: list[int]
+    alias: str | None = None
 
     def matches(self, v: int) -> bool:
         return v in self.lst
 
+    def rank(self):
+        return 1000 - len(self.lst)
+
     def __str__(self):
-        return f"{self.kind}{','.join([str(v) for v in self.lst])}"
+        return (
+            self.alias
+            if self.alias
+            else f"{self.kind}{','.join([str(v) for v in self.lst])}"
+        )
 
 
 # Empty tuple == wildcard (matches everything).
@@ -164,21 +183,21 @@ def parse_range(kind: NormalTokenKey, text: str) -> Token:
         raise ParseError(f"Invalid range '{text}' for {kind}")
 
 
-def _parse_part(part: str) -> Token:
+def parse_part(part: str) -> Token:
     """Parse one dot-separated segment into a Token."""
     low = part.lower()
 
     if low in Q_MONTHS:
         lo, hi = Q_MONTHS[low]
-        return RangeToken("q", lo, hi)
+        return RangeToken("moy", lo, hi, alias=low)
 
     if low in MONTH_ALIASES:
         v = MONTH_ALIASES[low]
-        return RangeToken("moy", v, v)
+        return RangeToken("moy", v, v, alias=low)
 
     if low in DOW_ALIASES:
         v = DOW_ALIASES[low]
-        return RangeToken("dow", v, v)
+        return RangeToken("dow", v, v, alias=low)
 
     for prefix in TOKEN_RANGES.keys():
         if low.startswith(prefix):
@@ -212,7 +231,7 @@ def parse_spec(spec: str) -> ParsedPath:
     prev_token = None
 
     for part in parts:
-        tok = _parse_part(part)
+        tok = parse_part(part)
         if prev_token:
             allowed = TOKEN_ALLOWED_CHILDREN[prev_token.kind]
             if tok.kind not in allowed:
@@ -246,12 +265,13 @@ def _flatten(
         )
 
 
-def _specificity(path: ParsedPath) -> tuple[int, int]:
-    """(depth, max_rank) - longer paths win; ties broken by finest token rank.
-    Empty path (wildcard) scores (0, 0)."""
+def _path_rank(path: ParsedPath) -> tuple[int, int, int]:
+    """(depth, type_rank, range_rank) - longer paths win; ties broken by finest token rank, etc.
+    Empty path (wildcard) scores (0, 0, 0)."""
     if not path:
-        return (0, 0)
-    return (len(path), max(TOKEN_SPECIFICITY[t.kind] for t in path))
+        return (0, 0, 0)
+    coverage = sum(tok.rank() for tok in path)
+    return (len(path), max(TOKEN_SPECIFICITY[t.kind] for t in path), coverage)
 
 
 def _matches_path(path: ParsedPath, dt: datetime) -> bool:
@@ -287,9 +307,11 @@ def _matches_path(path: ParsedPath, dt: datetime) -> bool:
     return True
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+def _path_to_str(path: ParsedPath) -> str:
+    """Canonical string reconstruction."""
+    if not path:
+        return "*"
+    return ".".join([str(tok) for tok in path])
 
 
 class YearMinuteMap:
@@ -347,7 +369,7 @@ class YearMinuteMap:
                 raise ValueError(f"Invalid spec '{spec_str}': {e}") from e
             self._entries.append((path, value))
 
-        self._entries.sort(key=lambda e: _specificity(e[0]), reverse=True)
+        self._entries.sort(key=lambda e: _path_rank(e[0]), reverse=True)
 
     def get_value(self, dt: datetime) -> int | None:
         """Return the value of the most specific matching spec, or None."""
@@ -366,13 +388,6 @@ class YearMinuteMap:
     def __repr__(self) -> str:
         parts = ", ".join(f"{_path_to_str(p)!r}: {v}" for p, v in self._entries)
         return f"YearMinuteMap({{{parts}}})"
-
-
-def _path_to_str(path: ParsedPath) -> str:
-    """Canonical string reconstruction."""
-    if not path:
-        return "*"
-    return ".".join([str(tok) for tok in path])
 
 
 if __name__ == "__main__":
