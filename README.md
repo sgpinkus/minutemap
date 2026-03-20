@@ -1,38 +1,35 @@
 # (YEARLY) MINUTE MAP
-The idea is you can specify a value (`int` by default) for any and every minute of an entire year. Which particular year isn't representable.
+Python library to specify a value (`int` by default) for any and every minute of an entire year. Which particular year isn't representable. Specifiers are like crontab's but hierarchical. Hierarchy and priority matching rules are used to determine the value for any given minute of the year.
 
-Time specifiers are like cron but hierarchical. Hierarchy and priority matching rules are used to determine the value for any given minute of the year. A specification takes the form of a set of `<expression, value>` pairs in JSON or as a dictionary.
+Create a `YearMinuteMap` instance then call `YearMinuteMap.get_value()` with a `datetime` to resolve a value:
 
-An `expression` is a dot-separated sequence of time tokens. The wildcard "\*" may appear as a standalone spec or as a leaf segment, and means "everything else" not matched my siblings at this level.
-
-Input may be a flat nested form; nested dicts are flattened by joining their key paths with ".".  Both dict and JSON string are accepted.
-
-The method `YearMinuteMap.get_value()` takes a `datetime`, and returns a value by selecting the most specific matching spec's value . Example:
-
-```
+```python
 my_minute_map =  {
   "*": 8,
   "h5-10": 28,
-  "h19": {
+  "q1": {
     "*": 18,
-    "m30-59": 22
+    "h18-22": 22
+  },
+  "q4": {
+    "*": 14,
+     "h18-22": 18
   },
   "q2": {
-    "h0-4": 10,
+    "*": 10,
     "h5-10": 30,
-    "h11-18": 10,
-    "h19-23": 20,
+    "h19-23": 20
   },
   "q3": {
     "h0-4": 12,
     "h5-10": 32,
     "h11-18": 12,
-    "h19-23": 20,
+    "h19-23": 20
     "sun": {
       "h0-4": 14,
       "h5-10": 34,
       "h11-18": 14,
-      "h19-23": 23,
+      "h19-23": 23
     }
   }
 }
@@ -40,7 +37,7 @@ spec = YearMinuteMap(my_minute_map)
 spec.get_value(my_date) # -> value
 ```
 
-Flat Example:
+As shown above, a specification takes the form of a set of `<expression, value>` pairs in JSON or as a dictionary. `expressions` are a sequence of time tokens. The wildcard "\*" may appear as a standalone spec or as a leaf segment, and means "everything else" not matched my siblings at this level. Input may be a flat nested form. Both dict and JSON string are accepted. Flat Example:
 
 ```
   {
@@ -51,7 +48,7 @@ Flat Example:
   }
 ```
 
-Crontab like steps and lists are also supported:
+Crontab like steps and lists are supported:
 
 ```
 {
