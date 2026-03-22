@@ -53,7 +53,8 @@ Crontab like steps and lists are supported:
 ```
 {
     "h0-11.m*/2": 1,
-    "h12-23.m*/3": 2
+    "h12-22.m*/3": 2,
+    "h23.m1,2,3,5,8,13,21,34,55": 3,
 }
 ```
 
